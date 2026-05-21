@@ -1,19 +1,25 @@
 #!/bin/bash
-# Package Monitor 启动脚本
+# Package Monitor Tauri 启动脚本
 # 使用方法: ./run.sh
+
+set -e
 
 cd "$(dirname "$0")"
 
-# 如果 venv 不存在则创建
-if [ ! -d "venv" ]; then
-    echo "正在创建虚拟环境..."
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt --quiet
-else
-    source venv/bin/activate
+if ! command -v npm >/dev/null 2>&1; then
+    echo "未找到 npm，请先安装 Node.js。"
+    exit 1
 fi
 
-# 启动应用
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "未找到 cargo，请先安装 Rust: https://rustup.rs"
+    exit 1
+fi
+
+if [ ! -d "node_modules" ]; then
+    echo "正在安装前端依赖..."
+    npm install
+fi
+
 echo "启动 Package Monitor..."
-python3 main.py
+npm run tauri:dev

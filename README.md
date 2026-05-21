@@ -1,70 +1,63 @@
-# Package Monitor - 包安装监控工具
+# Package Monitor
 
-一个 macOS 桌面应用，用于监控和展示每天安装的第三方包。
+一个 macOS 桌面应用，用于扫描 Homebrew、pip、npm、cargo、gem、go 等包管理器，并记录每次扫描后新增安装的第三方包。
 
-## 功能特性
+当前主版本已迁移为 Tauri + JavaScript + Vue 3。旧的 Python/Tkinter 文件仍保留在仓库中，方便对照迁移逻辑。
 
-- 📦 支持主流包管理器：Homebrew、pip、npm、cargo、gem、go
-- 📅 按日期浏览历史安装记录
-- 🔍 实时搜索过滤
-- 📊 生成美观的 HTML 报告
-- 💾 JSON 格式存储，便于查看和备份
+## 技术栈
 
-## 安装
+- Tauri 2
+- Vue 3
+- Vite
+- JavaScript
+- Rust
+
+## 环境要求
+
+- Node.js 18+
+- npm
+- Rust/Cargo
+- macOS
+
+安装 Rust：
 
 ```bash
-# 进入项目目录
-cd pkg-monitor
-
-# 安装依赖
-pip install -r requirements.txt
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-## 运行
+## 安装依赖
 
 ```bash
-python main.py
+npm install
 ```
 
-## 使用说明
+## 开发启动
 
-1. **启动扫描**：点击"立即扫描"按钮，工具会自动检测系统中已安装的包
-2. **浏览历史**：左侧日期列表可切换不同日期查看
-3. **搜索过滤**：在搜索框中输入关键词实时过滤
-4. **生成报告**：点击"生成报告"按钮，自动生成 HTML 报告并在浏览器中打开
+```bash
+npm run tauri:dev
+```
+
+只启动前端调试页面：
+
+```bash
+npm run dev
+```
+
+## 打包
+
+```bash
+npm run tauri:build
+```
 
 ## 数据存储
 
-- 配置文件：`~/.pkg-monitor/config.json`
 - 安装记录：`~/.pkg-monitor/records.json`
 - HTML 报告：`~/.pkg-monitor/reports/`
 
-## 配置选项
+## 功能
 
-编辑 `~/.pkg-monitor/config.json`：
-
-```json
-{
-  "scan_interval_hours": 24,
-  "auto_scan_on_startup": true,
-  "show_notifications": true,
-  "enabled_managers": ["homebrew", "pip", "npm", "cargo", "gem", "go"]
-}
-```
-
-## 支持的包管理器
-
-| 包管理器 | 说明 |
-|---------|------|
-| Homebrew | macOS 包管理器 |
-| pip/pip3 | Python 包管理器 |
-| npm | Node.js 包管理器 |
-| cargo | Rust 包管理器 |
-| gem | Ruby 包管理器 |
-| go | Go 语言工具 |
-
-## 系统要求
-
-- macOS 10.15+
-- Python 3.8+
-- tkinter（通常随 Python 一起安装）
+- 扫描当前系统中已安装的第三方包
+- 首次扫描建立基线，后续扫描只记录新增安装包
+- 按日期查看历史新增记录
+- 搜索包名或包管理器
+- 生成并打开 HTML 报告
