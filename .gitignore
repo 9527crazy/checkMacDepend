@@ -5,10 +5,14 @@ __pycache__/
 *.so
 .Python
 venv/
+.venv/
 env/
 *.egg-info/
 dist/
 build/
+
+# WorkBuddy
+.workbuddy/
 
 # JavaScript / Tauri
 node_modules/
