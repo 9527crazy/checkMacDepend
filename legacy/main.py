@@ -48,18 +48,6 @@ def main():
     # Initialize report generator
     report_generator = ReportGenerator(config.reports_path)
     
-    # Auto scan on startup
-    if config.get("auto_scan_on_startup"):
-        print("\n正在执行启动扫描...")
-        from datetime import datetime
-        today = datetime.now().strftime("%Y-%m-%d")
-        packages = scanner_manager.scan_all()
-        if packages:
-            storage.add_packages(today, packages)
-            print(f"扫描完成，发现 {len(packages)} 个包")
-        else:
-            print("未发现已安装的包")
-    
     # Launch GUI
     print("\n正在启动图形界面...")
     app = PackageMonitorUI(scanner_manager, storage, report_generator, config)

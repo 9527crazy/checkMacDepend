@@ -2,9 +2,8 @@
 GUI Interface using tkinter
 """
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-from datetime import datetime, timedelta
-from typing import List, Dict, Callable
+from tkinter import ttk, messagebox
+from datetime import datetime
 import threading
 
 
@@ -16,6 +15,8 @@ class PackageMonitorUI:
         self.storage = storage
         self.report_generator = report_generator
         self.config = config
+        self.is_scanning = False
+        self.next_scan_job = None
         
         self.root = tk.Tk()
         self.root.title("Package Monitor - 包安装监控")
@@ -43,6 +44,11 @@ class PackageMonitorUI:
         self._setup_styles()
         self._create_widgets()
         self._load_data()
+
+        if self.config.get("auto_scan_on_startup"):
+            self.root.after(100, lambda: self._start_scan(reason="startup"))
+        else:
+            self._schedule_next_scan()
     
     def _setup_styles(self):
         """Configure ttk styles"""
@@ -192,7 +198,8 @@ class PackageMonitorUI:
         
         # Update status
         total = self.storage.get_total_count()
-        self.status_label.config(text=f"就绪 | 总包数: {total} | 上次扫描: 从未")
+        last_scan_at = self.storage.get_last_scan_at() or "从未"
+        self.status_label.config(text=f"就绪 | 新增安装记录: {total} | 上次扫描: {last_scan_at}")
     
     def _on_date_select(self, event):
         """Handle date selection"""
@@ -227,29 +234,94 @@ class PackageMonitorUI:
                 pkg.get('time', '')
             ))
     
-    def _start_scan(self):
+    def _get_scan_interval_ms(self):
+        """Get scan interval in milliseconds, with a one-hour minimum."""
+        try:
+            hours = float(self.config.get("scan_interval_hours", 24))
+        except (TypeError, ValueError):
+            hours = 24
+
+        if hours < 1:
+            hours = 1
+
+        return int(hours * 60 * 60 * 1000)
+
+    def _schedule_next_scan(self):
+        """Schedule the next periodic scan."""
+        if self.next_scan_job is not None:
+            self.root.after_cancel(self.next_scan_job)
+
+        self.next_scan_job = self.root.after(
+            self._get_scan_interval_ms(),
+            self._run_scheduled_scan
+        )
+
+    def _run_scheduled_scan(self):
+        """Run a scheduled scan or defer it if a scan is already active."""
+        self.next_scan_job = None
+        if self.is_scanning:
+            self._schedule_next_scan()
+            return
+
+        self._start_scan(reason="scheduled")
+
+    def _should_show_notifications(self):
+        """Return whether completion message boxes should be shown."""
+        return bool(self.config.get("show_notifications", True))
+
+    def _start_scan(self, reason="manual"):
         """Start scanning packages in background"""
+        if self.is_scanning:
+            self.status_label.config(text="扫描已在进行中...")
+            return
+
+        self.is_scanning = True
+        self.status_label.config(text="扫描中...")
+
         def scan_thread():
-            self.status_label.config(text="扫描中...")
-            
-            packages = self.scanner_manager.scan_all()
-            
-            if packages:
-                self.storage.add_packages(self.selected_date, packages)
-            
-            # Update UI in main thread
-            self.root.after(0, self._on_scan_complete, len(packages))
+            try:
+                packages = self.scanner_manager.scan_all()
+                now = datetime.now()
+                result = self.storage.record_scan(
+                    now.strftime("%Y-%m-%d"),
+                    packages,
+                    now.strftime("%Y-%m-%d %H:%M")
+                )
+                self.root.after(0, self._on_scan_complete, result)
+            except Exception as e:
+                self.root.after(0, self._on_scan_error, e)
         
         thread = threading.Thread(target=scan_thread, daemon=True)
         thread.start()
     
-    def _on_scan_complete(self, count):
+    def _on_scan_complete(self, result):
         """Called when scan is complete"""
+        self.is_scanning = False
         self._load_data()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now = result.get("scanned_at", datetime.now().strftime("%Y-%m-%d %H:%M"))
         total = self.storage.get_total_count()
-        self.status_label.config(text=f"扫描完成 | 本次: {count} 个包 | 总计: {total} | 时间: {now}")
-        messagebox.showinfo("扫描完成", f"发现 {count} 个已安装的包")
+        count = result.get("new_count", 0)
+
+        if result.get("is_initial_scan"):
+            message = f"首次扫描已建立基线 | 已扫描: {result.get('scanned_count', 0)} 个包 | 时间: {now}"
+            dialog_message = "首次扫描已建立基线，后续扫描将记录新增安装包"
+        else:
+            message = f"扫描完成 | 新增: {count} 个安装包 | 总计: {total} | 时间: {now}"
+            dialog_message = f"发现 {count} 个新增安装包"
+
+        self.status_label.config(text=message)
+        if self._should_show_notifications():
+            messagebox.showinfo("扫描完成", dialog_message)
+
+        self._schedule_next_scan()
+
+    def _on_scan_error(self, error):
+        """Called when a scan fails."""
+        self.is_scanning = False
+        self.status_label.config(text=f"扫描失败: {error}")
+        if self._should_show_notifications():
+            messagebox.showerror("扫描失败", str(error))
+        self._schedule_next_scan()
     
     def _generate_report(self):
         """Generate HTML report"""
@@ -266,7 +338,9 @@ class PackageMonitorUI:
         import webbrowser
         webbrowser.open(f"file://{filepath}")
         
-        messagebox.showinfo("报告已生成", f"报告已保存到:\n{filepath}")
+        self.status_label.config(text=f"报告已生成: {filepath}")
+        if self._should_show_notifications():
+            messagebox.showinfo("报告已生成", f"报告已保存到:\n{filepath}")
     
     def run(self):
         """Run the application"""
