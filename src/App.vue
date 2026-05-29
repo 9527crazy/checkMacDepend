@@ -34,8 +34,8 @@
         </button>
         <button 
           type="button" 
-          class="sf-button primary" 
-          :class="{ loading: busy }" 
+          class="sf-button" 
+          :class="busy ? 'scanning' : 'primary'" 
           :disabled="busy" 
           @click="handleScan"
         >
@@ -972,8 +972,10 @@ tr:hover td {
   to { transform: rotate(360deg); }
 }
 
-.sf-button.loading {
-  opacity: 0.8;
+.sf-button.scanning {
+  background: linear-gradient(180deg, #FF6B6B 0%, var(--sf-red) 100%);
+  color: white;
+  box-shadow: 0 1px 3px rgba(255, 59, 48, 0.3);
   cursor: wait;
 }
 
