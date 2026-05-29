@@ -25,7 +25,10 @@
           type="button" 
           class="sf-button secondary" 
           :disabled="!selectedDate || busy" 
+          aria-label="生成报告"
+          tabindex="0"
           @click="handleReport"
+          @keydown.enter="handleReport"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8zm0 3h4v1H5v-1z"/>
@@ -37,7 +40,10 @@
           class="sf-button" 
           :class="busy ? 'scanning' : 'primary'" 
           :disabled="busy" 
+          aria-label="立即扫描"
+          tabindex="0"
           @click="handleScan"
+          @keydown.enter="handleScan"
         >
           <span v-if="busy" class="spinner"></span>
           <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -76,6 +82,23 @@
             <div class="stat-row">
               <span class="stat-key">管理器</span>
               <span class="stat-val managers" :title="managerList">{{ managerText }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scan History Section -->
+        <div class="sidebar-section" v-if="scanHistory.length > 0">
+          <div class="sidebar-title">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm.5 3.5v5l-3 2 .5 1 3.5-2V4.5h-1z"/>
+            </svg>
+            最近扫描
+          </div>
+          <div class="history-list">
+            <div v-for="(item, idx) in scanHistory" :key="idx" class="history-item">
+              <span class="history-dot"></span>
+              <span class="history-time">{{ item.time }}</span>
+              <span class="history-count">{{ item.count }} 个包</span>
             </div>
           </div>
         </div>
@@ -141,6 +164,7 @@
               class="date-item"
               :class="{ active: date === selectedDate }"
               @click="selectedDate = date"
+              @keydown.enter="selectedDate = date"
             >
               <span class="date-text">{{ formatDate(date) }}</span>
               <span class="date-count">{{ getDayCount(date) }}</span>
@@ -164,13 +188,22 @@
             <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
               <path d="M11.742 10.344a6.5 6.5 0 10-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 001.415-1.414l-3.85-3.85a1.007 1.007 0 00-.115-.1zM12 6.5a5.5 5.5 0 11-11 0 5.5 5.5 0 0111 0z"/>
             </svg>
-            <input v-model.trim="query" type="search" placeholder="搜索包名..." />
+            <input v-model.trim="query" type="search" placeholder="搜索包名..." aria-label="搜索包名" @keydown.escape="query = ''" />
           </div>
         </div>
 
         <div class="table-container">
-          <div class="table-wrap" v-if="filteredPackages.length > 0">
+          <div v-if="!stateLoaded" class="skeleton-table">
+              <div class="skeleton-row" v-for="i in 5" :key="i">
+                <div class="skeleton-cell skeleton-badge"></div>
+                <div class="skeleton-cell skeleton-text" :class="'skeleton-w-' + i"></div>
+                <div class="skeleton-cell skeleton-text" style="width: 20%"></div>
+                <div class="skeleton-cell skeleton-text" style="width: 15%"></div>
+              </div>
+            </div>
+          <div class="table-wrap" v-else-if="filteredPackages.length > 0" role="table" aria-describedby="table-desc">
             <table>
+              <caption id="table-desc" class="sr-only">已安装包列表，包含管理器、包名、版本和时间信息</caption>
               <thead>
                 <tr>
                   <th class="th-manager">管理器</th>
@@ -251,19 +284,48 @@
         </div>
 
         <!-- Status Bar -->
-        <div class="status-bar" :class="{ active: busy }">
+        <div class="status-bar" :class="{ active: busy, error: hasError }" role="status" :aria-live="busy ? 'off' : 'polite'">
           <span class="status-message">{{ statusMessage }}</span>
-          <span class="status-total" v-if="state.total_count">
-            共 {{ state.total_count }} 个包
-          </span>
+          <div class="status-right">
+            <button v-if="hasError" type="button" class="retry-btn" @click="handleScan" aria-label="重试扫描">重试</button>
+            <span class="status-total" v-if="state.total_count">
+              共 {{ state.total_count }} 个包
+            </span>
+          </div>
         </div>
       </section>
     </section>
   </main>
+
+  <!-- Toast Notifications -->
+  <Teleport to="body">
+    <div class="toast-container" aria-live="polite">
+      <TransitionGroup name="toast">
+        <div
+          v-for="toast in toasts"
+          :key="toast.id"
+          class="toast-item"
+          :class="toast.type"
+        >
+          <svg v-if="toast.type === 'info'" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 3a1 1 0 110 2 1 1 0 010-2zm-1 3h2v5H7V7z"/>
+          </svg>
+          <svg v-else-if="toast.type === 'success'" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm3.3 5.3l-4 4a.7.7 0 01-1 0l-2-2a.7.7 0 011-1L7 8.8l3.5-3.5a.7.7 0 011 1z"/>
+          </svg>
+          <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 3a1 1 0 110 2 1 1 0 010-2zm-1 3h2v5H7V7z"/>
+          </svg>
+          <span class="toast-msg">{{ toast.message }}</span>
+          <button class="toast-close" @click="dismissToast(toast.id)" aria-label="关闭通知">&times;</button>
+        </div>
+      </TransitionGroup>
+    </div>
+  </Teleport>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, reactive } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { 
   generateReport, 
@@ -297,6 +359,12 @@ const logExpanded = ref(false);
 const logContainer = ref(null);
 let unlisten = null;
 let unlistenLog = null;
+const stateLoaded = ref(false);
+const scanCount = ref(0);
+const hasError = ref(false);
+const scanHistory = ref(JSON.parse(localStorage.getItem("scan-history") || "[]"));
+const toasts = ref([]);
+let toastId = 0;
 
 const dates = computed(() => state.value.dates || []);
 const managerText = computed(() => {
@@ -348,16 +416,25 @@ async function refreshSchedule() {
 
 async function handleScan() {
   busy.value = true;
+  hasError.value = false;
   logExpanded.value = true;
+  scanCount.value = 0;
   statusMessage.value = "扫描中...";
+  showToast("正在启动扫描...", "info");
   try {
     const result = await scanPackages();
     await refreshState(result.scanned_at.slice(0, 10));
-    statusMessage.value = result.is_initial_scan
+    const msg = result.is_initial_scan
       ? `首次扫描完成，${result.scanned_count} 个包`
       : `扫描完成，新增 ${result.new_count} 个包`;
+    statusMessage.value = msg;
+    showToast(msg, "success");
+    saveScanHistory(result.scanned_count);
+    stateLoaded.value = true;
   } catch (error) {
+    hasError.value = true;
     statusMessage.value = `扫描失败: ${error}`;
+    showToast(`扫描失败: ${error}`, "error");
   } finally {
     busy.value = false;
   }
@@ -366,12 +443,16 @@ async function handleScan() {
 async function handleReport() {
   if (!selectedDate.value) return;
   busy.value = true;
+  hasError.value = false;
   statusMessage.value = "生成报告...";
   try {
     await generateReport(selectedDate.value);
     statusMessage.value = "报告已生成并打开";
+    showToast("报告已生成并打开", "success");
   } catch (error) {
+    hasError.value = true;
     statusMessage.value = `报告生成失败: ${error}`;
+    showToast(`报告生成失败: ${error}`, "error");
   } finally {
     busy.value = false;
   }
@@ -406,6 +487,26 @@ function clearLogs() {
   logEntries.value = [];
 }
 
+function showToast(message, type = "info") {
+  const id = ++toastId;
+  toasts.value.push({ id, message, type });
+  setTimeout(() => {
+    toasts.value = toasts.value.filter((t) => t.id !== id);
+  }, 3000);
+}
+
+function dismissToast(id) {
+  toasts.value = toasts.value.filter((t) => t.id !== id);
+}
+
+function saveScanHistory(count) {
+  const now = new Date();
+  const timeStr = `${now.getMonth() + 1}/${now.getDate()} ${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+  scanHistory.value.unshift({ time: timeStr, count });
+  if (scanHistory.value.length > 5) scanHistory.value.length = 5;
+  localStorage.setItem("scan-history", JSON.stringify(scanHistory.value));
+}
+
 onMounted(async () => {
   unlisten = await listen("request-scan", () => {
     handleScan();
@@ -413,6 +514,10 @@ onMounted(async () => {
 
   unlistenLog = await listen("scan-log", (event) => {
     logEntries.value.push(event.payload);
+    if (event.payload.level === "info" && busy.value) {
+      scanCount.value++;
+      statusMessage.value = `扫描中... 已发现 ${scanCount.value} 个包`;
+    }
     nextTick(() => {
       if (logContainer.value) {
         logContainer.value.scrollTop = logContainer.value.scrollHeight;
@@ -423,8 +528,11 @@ onMounted(async () => {
   try {
     await refreshState();
     await refreshSchedule();
+    stateLoaded.value = true;
   } catch (error) {
+    hasError.value = true;
     statusMessage.value = `加载失败: ${error}`;
+    showToast(`加载失败: ${error}`, "error");
   }
 });
 
@@ -466,6 +574,21 @@ body {
   background: var(--sf-gray-6);
   color: var(--sf-text);
   -webkit-font-smoothing: antialiased;
+  min-width: 900px;
+  min-height: 100vh;
+}
+
+button, input, select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .app-shell {
@@ -576,7 +699,7 @@ body {
 
 /* Sidebar */
 .sidebar {
-  width: 200px;
+  width: 220px;
   background: var(--sf-sidebar);
   border-right: 1px solid var(--sf-gray-5);
   display: flex;
@@ -593,7 +716,7 @@ body {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--sf-text-sec);
   text-transform: uppercase;
@@ -624,7 +747,7 @@ body {
 }
 
 .stat-label {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--sf-text-sec);
 }
 
@@ -643,15 +766,14 @@ body {
 }
 
 .stat-key {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--sf-text-sec);
 }
 
 .stat-val {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--sf-text);
   font-weight: 500;
-  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -668,7 +790,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--sf-text-sec);
 }
 
@@ -710,6 +832,8 @@ body {
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
+  color: var(--sf-text);
+  font-family: inherit;
 }
 
 .date-item:hover {
@@ -718,30 +842,30 @@ body {
 
 .date-item.active {
   background: var(--sf-blue);
-  color: white;
+  color: white !important;
 }
 
 .date-text {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  color: var(--sf-text);
+  color: inherit;
 }
 
 .date-item.active .date-text {
-  color: white;
+  color: white !important;
 }
 
 .date-count {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--sf-text-sec);
   background: var(--sf-gray-5);
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: 10px;
 }
 
 .date-item.active .date-count {
   background: rgba(255,255,255,0.25);
-  color: white;
+  color: white !important;
 }
 
 .empty-state-mini {
@@ -750,7 +874,7 @@ body {
 }
 
 .empty-state-mini p {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--sf-text-sec);
 }
 
@@ -760,6 +884,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 
 .content-header {
@@ -834,12 +959,12 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .table-wrap {
   flex: 1;
   overflow: auto;
-  padding: 0 20px;
 }
 
 table {
@@ -862,6 +987,11 @@ th {
   border-bottom: 2px solid var(--sf-gray-5);
   z-index: 1;
 }
+
+.th-manager { width: 100px; }
+.th-name { min-width: 180px; }
+.th-version { width: 120px; }
+.th-time { width: 100px; }
 
 td {
   padding: 10px 12px;
@@ -970,6 +1100,7 @@ tr:hover td {
   border-top: 1px solid var(--sf-gray-5);
   background: var(--sf-bg);
   flex-shrink: 0;
+  max-height: 240px;
 }
 
 .log-panel.collapsed .log-body {
@@ -1179,5 +1310,240 @@ tr:hover td {
 .status-total {
   color: var(--sf-blue);
   font-weight: 500;
+}
+
+/* Toast Notifications */
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--sf-bg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--sf-text);
+  pointer-events: auto;
+  max-width: 320px;
+}
+
+.toast-item.info {
+  border-left: 3px solid var(--sf-blue);
+}
+
+.toast-item.info svg {
+  color: var(--sf-blue);
+  flex-shrink: 0;
+}
+
+.toast-item.success {
+  border-left: 3px solid var(--sf-green);
+}
+
+.toast-item.success svg {
+  color: var(--sf-green);
+  flex-shrink: 0;
+}
+
+.toast-item.error {
+  border-left: 3px solid var(--sf-red);
+}
+
+.toast-item.error svg {
+  color: var(--sf-red);
+  flex-shrink: 0;
+}
+
+.toast-msg {
+  line-height: 1.3;
+  flex: 1;
+}
+
+.toast-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--sf-gray-2);
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.toast-close:hover {
+  background: var(--sf-gray-5);
+  color: var(--sf-text);
+}
+
+.toast-enter-active {
+  transition: all 0.25s ease;
+}
+
+.toast-leave-active {
+  transition: all 0.2s ease;
+}
+
+.toast-enter-from {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
+}
+
+/* Status bar error state */
+.status-bar.error {
+  background: rgba(255, 59, 48, 0.08);
+}
+
+.status-bar.error .status-message {
+  color: var(--sf-red);
+  font-weight: 500;
+}
+
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.retry-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border: 1px solid var(--sf-red);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--sf-red);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.retry-btn:hover {
+  background: var(--sf-red);
+  color: white;
+}
+
+/* Screen reader only */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skeleton loading */
+.skeleton-table {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.skeleton-cell {
+  height: 16px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--sf-gray-5) 25%, var(--sf-gray-4) 50%, var(--sf-gray-5) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.skeleton-badge {
+  width: 60px;
+  height: 20px;
+  border-radius: 4px;
+}
+
+.skeleton-text {
+  height: 14px;
+}
+
+.skeleton-w-1 { width: 55%; }
+.skeleton-w-2 { width: 42%; }
+.skeleton-w-3 { width: 63%; }
+.skeleton-w-4 { width: 48%; }
+.skeleton-w-5 { width: 58%; }
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Scan history */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--sf-text-sec);
+  padding: 4px 0;
+}
+
+.history-item:first-child .history-time {
+  font-weight: 600;
+  color: var(--sf-text);
+}
+
+.history-item:first-child .history-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--sf-green);
+  box-shadow: 0 0 4px rgba(52, 199, 89, 0.4);
+}
+
+.history-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sf-gray-3);
+  flex-shrink: 0;
+}
+
+.history-time {
+  font-weight: 500;
+  color: var(--sf-text);
+  min-width: 70px;
+}
+
+.history-count {
+  color: var(--sf-text-sec);
 }
 </style>

@@ -749,6 +749,13 @@ fn generate_report(app: tauri::AppHandle, date: String) -> Result<String, String
     Ok(path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn toggle_devtools(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        window.open_devtools();
+    }
+}
+
 fn main() {
     let scan_schedule = Arc::new(Mutex::new(ScanSchedule::default()));
     
@@ -761,7 +768,8 @@ fn main() {
             generate_report,
             get_scan_schedule,
             start_scheduled_scan,
-            stop_scheduled_scan
+            stop_scheduled_scan,
+            toggle_devtools
         ])
         .setup(|app| {
             // Build tray menu
