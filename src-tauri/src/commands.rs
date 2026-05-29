@@ -104,11 +104,17 @@ pub fn get_app_state() -> Result<AppState, String> {
 }
 
 #[tauri::command]
-pub fn scan_packages(
+pub async fn scan_packages(
     app: tauri::AppHandle,
     schedule_handle: tauri::State<'_, SchedulerHandle>,
 ) -> Result<ScanResult, String> {
-    scan_and_persist(&app, &schedule_handle)
+    let app_clone = app.clone();
+    let schedule_clone = schedule_handle.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        scan_and_persist(&app_clone, &schedule_clone)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

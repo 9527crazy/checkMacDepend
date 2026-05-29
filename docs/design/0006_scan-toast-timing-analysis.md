@@ -1,8 +1,8 @@
 # 扫描 Toast 时序问题分析
 
-**文档版本**: 1.0  
+**文档版本**: 2.0  
 **日期**: 2026-05-29  
-**状态**: 分析中
+**状态**: 分析完成
 
 ---
 
@@ -15,321 +15,258 @@
 
 期望行为：先看到"正在启动扫描..."，扫描完成后切换为"扫描完成"。
 
+**关键实验**: 将 `scanPackages()` 调用注释掉后，toast 能正常显示。这排除了 Vue/前端层面的问题。
+
 ---
 
-## 完整调用流程
+## 根因：Rust 同步命令阻塞主线程
 
-### 1. 前端入口
+### 问题本质
+
+`scan_packages` 是一个 **同步** `#[tauri::command]`，在 Tauri 2 中会在 **主线程** 上执行。函数内部调用 `Command::new("brew").output()` 等阻塞操作，导致主线程被占用，Webview 无法处理任何事件（包括 Vue 的 DOM 更新）。
+
+### 完整调用链
 
 ```
-用户点击"立即扫描"
+JS: invoke("scan_packages")
     ↓
-handleScan()                          ← src/App.vue:417
-    │
-    ├─ [1] busy = true
-    ├─ [2] hasError = false
-    ├─ [3] logExpanded = true
-    ├─ [4] scanCount = 0
-    ├─ [5] statusMessage = "扫描中..."     ← 响应式 ref，触发 Vue 调度
-    ├─ [6] showToast("正在启动扫描...", "info")
-    │       └─ toasts.value.push({id, message, type})  ← 响应式 ref，触发 Vue 调度
-    │       └─ setTimeout(3000ms) 自动清除
-    │
-    ├─ [7] await scanPackages()
-    │       └─ invoke("scan_packages")   ← Tauri IPC，返回 Promise
-    │           └─ → Rust 后端执行
-    │
-    ├─ [8] await refreshState(...)
-    │       └─ invoke("get_app_state")   ← Tauri IPC
-    │
-    ├─ [9] statusMessage = msg
-    ├─ [10] showToast(msg, "success")
-    │       └─ toasts.value.push({id, message, type})
-    │       └─ setTimeout(3000ms) 自动清除
-    ├─ [11] saveScanHistory(...)
-    ├─ [12] stateLoaded = true
-    │
-    └─ finally: busy = false
+WKWebView IPC (主线程回调)
+    ↓
+protocol.rs: handle_ipc_message()        ← 主线程
+    ↓
+webview/mod.rs: on_message()             ← 主线程
+    ↓
+manager/mod.rs: run_invoke_handler()     ← 主线程
+    ↓
+handler 闭包 → wrapper 函数              ← 主线程
+    ↓
+scan_packages() 同步执行                 ← 主线程被阻塞
+    ├─ Command::new("brew").output()     ← 阻塞等待进程结束
+    ├─ Command::new("pip3").output()     ← 阻塞
+    ├─ Command::new("npm").output()      ← 阻塞
+    ├─ load_storage()                    ← 同步文件 IO
+    └─ save_storage()                    ← 同步文件 IO
+    ↓
+结果通过 resolver.respond() 返回         ← 主线程
+    ↓
+Vue 终于可以更新 DOM → 两个 toast 同时渲染
 ```
 
-### 2. Rust 后端执行
+### 为什么 toast 不显示
 
 ```
-scan_packages(app)                    ← src-tauri/src/main.rs:442
-    │
-    ├─ scanned_at = now_minutes()
-    ├─ packages = scan_all_packages_with_log(&app, &scanned_at)
-    │       │
-    │       ├─ emit_log("开始扫描系统包...")
-    │       ├─ for each manager (homebrew/pip/npm/cargo/gem/go):
-    │       │     ├─ is_available(command)    ← 执行 which 命令
-    │       │     ├─ scan_fn(scanned_at)      ← 执行 brew/pip/npm 等命令
-    │       │     │     └─ Command::new().output()  ← 阻塞调用，等待进程结束
-    │       │     └─ emit_log("找到 X 个包")
-    │       └─ return packages
-    │
-    ├─ load_storage()                  ← 读取 ~/.pkg-monitor/records.json
-    ├─ 对比新旧快照，找出新增包
-    ├─ save_storage()                  ← 写入 ~/.pkg-monitor/records.json
-    ├─ emit_log("扫描完成！共 X 个包")
-    └─ return ScanResult
+时间轴 →
+
+[T0] 主线程:
+     handleScan() 开始执行
+     statusMessage = "扫描中..."          ← ref 被修改，Vue 标记需要更新
+     showToast("正在启动扫描...", "info")  ← toasts 数组被修改，Vue 标记需要更新
+     ↓
+[T1] 主线程:
+     await scanPackages() → invoke() 发送 IPC
+     主线程被 scan_packages() 阻塞        ← ⚠️ 关键：主线程卡死
+     │
+     │  （Vue 无法更新 DOM，因为主线程在等 Rust 执行完）
+     │  （Webview 无法处理任何事件）
+     │
+     │  ... scan_packages 执行中 ...
+     │  ... Command::new("brew").output() 等待 brew 进程 ...
+     │  ... load_storage() 读文件 ...
+     │  ... save_storage() 写文件 ...
+     │
+[T2] 主线程:
+     scan_packages() 返回结果
+     resolve 传回 JS
+     ↓
+[T3] 主线程:
+     handleScan() 续行
+     showToast("扫描完成", "success")     ← 第二个 toast 也被添加
+     ↓
+[T4] 主线程:
+     所有同步代码执行完毕
+     Vue flush DOM                        ← 一次性渲染两个 toast
+     用户看到两个 toast 同时出现
 ```
 
-### 3. Tauri 命令执行机制
+**核心问题**: Vue 的 DOM 更新需要主线程空闲。`scan_packages` 在主线程上执行了所有阻塞操作（进程调用 + 文件 IO），Vue 在此期间完全无法更新 DOM。
+
+---
+
+## Tauri 2 命令执行机制
+
+### 同步命令 vs 异步命令
 
 ```rust
+// 同步命令 → 主线程执行 → 阻塞 UI
 #[tauri::command]
 fn scan_packages(app: tauri::AppHandle) -> Result<ScanResult, String> {
-    // 同步函数，返回 Result
-    // Tauri 2 默认行为：同步命令在专用线程池中执行，不阻塞主线程
+    // 这里的代码在主线程执行
+    // 任何阻塞操作都会冻结 UI
+}
+
+// 异步命令 → async_runtime 执行 → 不阻塞 UI
+#[tauri::command]
+async fn scan_packages(app: tauri::AppHandle) -> Result<ScanResult, String> {
+    // 这里的代码在 tokio async_runtime 执行
+    // 不阻塞主线程
 }
 ```
 
-- `invoke("scan_packages")` 在 JS 侧返回 Promise
-- Rust 函数在 Tauri 的 **命令线程池** 中执行（非主线程）
-- JS 事件循环不受 Rust 执行影响
-- Promise 在 Rust 函数返回时 resolve
+### 源码证据
 
----
+**wrapper.rs** (Tauri 命令宏):
 
-## 问题根因分析
+```rust
+// 默认执行上下文是 Blocking
+execution_context: ExecutionContext::Blocking,
 
-### 核心假设：Vue 的 DOM 更新是异步批量的
-
-Vue 3 的响应式系统在修改 ref 后**不会立即更新 DOM**，而是将更新任务加入队列，在当前同步代码执行完毕后的微任务阶段统一刷新。
-
-关键机制：
-- 修改 `ref` → 触发 `trigger()` → 调用 `queueJob()` → 调度 `queueFlush()`
-- `queueFlush()` 通过 `Promise.resolve().then(flushJobs)` 安排一次微任务刷新
-- 多个 ref 在同一同步代码块中修改 → **只触发一次 DOM 刷新**
-
-### 时序推演
-
-#### 场景 A：扫描耗时 > 16ms（正常情况）
-
-```
-时间轴 →
-
-[T0] 同步执行阶段:
-     statusMessage = "扫描中..."        ← ref 触发 Vue 调度
-     showToast("正在启动扫描...", "info") ← ref 触发 Vue 调度
-     await scanPackages()               ← yield，让出执行权
-     ↓
-[T1] 微任务队列:
-     Vue flushJobs() → DOM 更新 → "正在启动扫描..." toast 渲染到屏幕 ✓
-     ↓
-[T2] 等待 Rust 后端完成扫描...
-     ↓
-[T3] scanPackages Promise resolve
-     await 续行
-     ↓
-[T4] 同步执行阶段:
-     showToast("扫描完成", "success")    ← ref 触发 Vue 调度
-     ↓
-[T5] 微任务队列:
-     Vue flushJobs() → DOM 更新 → "扫描完成" toast 渲染到屏幕 ✓
-```
-
-**结果**: 两个 toast 先后出现，符合预期。✅
-
-#### 场景 B：扫描极快（< 1ms，Promise 在 await 时已 resolved）
-
-```
-时间轴 →
-
-[T0] 同步执行阶段:
-     statusMessage = "扫描中..."        ← ref 触发 Vue 调度
-     showToast("正在启动扫描...", "info") ← ref 触发 Vue 调度
-     await scanPackages()               ← Promise 已 resolved
-                                          将续行作为微任务入队
-     ↓
-[T1] 微任务队列 (FIFO):
-     [a] Vue flushJobs() → DOM 更新 → "正在启动扫描..." 渲染 ✓
-     [b] handleScan 续行
-         → showToast("扫描完成", "success") ← ref 触发 Vue 调度
-         → await refreshState(...)
-         → ...
-     ↓
-[T2] 微任务队列:
-     [c] Vue flushJobs() → DOM 更新 → "扫描完成" 渲染 ✓
-```
-
-**结果**: 两个 toast 先后出现，但间隔极短（< 16ms），用户可能感知为"同时出现"。⚠️
-
-#### 场景 C：扫描极快 + Vue flush 被续行抢先（理论可能）
-
-```
-时间轴 →
-
-[T0] 同步执行阶段:
-     showToast("正在启动扫描...", "info")
-     await scanPackages()               ← Promise 已 resolved
-     ↓
-[T1] 微任务队列:
-     [a] Vue flushJobs()               ← Vue 的 flush
-     [b] handleScan 续行               ← Promise 的 .then
-     如果 [b] 先于 [a] 执行:
-         → showToast("扫描完成", "success")
-         → 两个 toast 都在 toasts 数组中
-         → Vue flush 只触发一次
-         → 两个 toast 同时渲染到屏幕
-```
-
-**关键问题**: 微任务队列是 FIFO，Vue 的 `queueFlush` 和 Promise 的 `.then` 哪个先入队？
-
-- Vue 的 `queueJob` 在 `showToast` → `toasts.value.push()` 时同步调用
-- `queueFlush` 通过 `Promise.resolve().then(flushJobs)` 安排微任务
-- `await scanPackages()` 的续行也在 Promise resolve 时安排微任务
-
-如果 `scanPackages()` 的 Promise 在 `showToast` **之前**就已经 resolved（极端情况），那么续行的微任务先入队，Vue flush 后入队。**但这种情况不可能**，因为 `showToast` 在 `await` 之前同步执行，Vue 的 queueFlush 一定先于 await 续行入队。
-
-**所以场景 C 在正常情况下不会发生。**
-
-### 真正的根因
-
-#### 原因 1：扫描极快导致两个 toast 几乎同时渲染
-
-当 Rust 后端扫描极快（如所有包管理器都已缓存），`invoke` 返回的 Promise 可能在 1-5ms 内 resolve。虽然 Vue 会分别渲染两个 toast，但间隔太短（< 16ms），用户看到的效果就是**两个 toast 同时弹出**。
-
-#### 原因 2：TransitionGroup 动画导致视觉重叠
-
-Toast 使用 `TransitionGroup` 渲染，有 250ms 的 enter 动画：
-
-```css
-.toast-enter-active { transition: all 0.25s ease; }
-.toast-enter-from { opacity: 0; transform: translateX(20px); }
-```
-
-当两个 toast 在极短时间内先后添加时：
-1. 第一个 toast 开始 enter 动画（从 opacity:0 → 1）
-2. 第二个 toast 紧接着也开始 enter 动画
-3. 用户看到两个 toast **同时从右侧滑入**
-
-#### 原因 3：3秒自动清除可能干扰
-
-`showToast` 有 `setTimeout(3000ms)` 自动清除。如果扫描耗时 > 3 秒（极端情况），info toast 会在 success toast 出现前被清除。但这不太常见。
-
----
-
-## 为什么之前尝试的修复不生效
-
-### 尝试 1：800ms 延迟
-
-```js
-const scanStart = Date.now();
-// ... scan ...
-const elapsed = Date.now() - scanStart;
-if (elapsed < 800) {
-  await new Promise(r => setTimeout(r, 800 - elapsed));
+// 如果函数是 async，改为 Async
+if function.sig.asyncness.is_some() {
+    attrs.execution_context = ExecutionContext::Async;
 }
-showToast(msg, "success");
 ```
 
-**问题**: `setTimeout` 创建的是宏任务，不是微任务。在等待 setTimeout 期间，Vue 已经完成了 info toast 的渲染。但 setTimeout 的回调执行时，info toast 可能已经被 Vue 的 TransitionGroup 移除了（如果 Vue 的批量更新把两个 toast 的添加和之前的某个移除操作合并在了一起）。
-
-实际上这个方案逻辑上应该有效，但用户反馈 info toast 不显示了。可能原因：
-- `await new Promise(r => setTimeout(r, 800 - elapsed))` 在 `elapsed >= 800` 时不等待，直接执行
-- 如果 `scanPackages()` 耗时 > 800ms，elapsed >= 800，不会等待，info toast 短暂显示后被 success toast 替代
-- 如果 `scanPackages()` 耗时 < 800ms，等待到 800ms 后弹 success toast
-
-但用户说 info toast 不显示了，这说明可能有更深层的问题。
-
-### 尝试 2：nextTick + dismissToast
-
-```js
-const scanToastId = showToast("正在启动扫描...", "info");
-await nextTick();
-// ...
-dismissToast(scanToastId);
-showToast(msg, "success");
+**Blocking 路径** — 直接在当前线程（主线程）执行:
+```rust
+fn body_blocking(...) -> TokenStream2 {
+    Ok(quote! {
+        let result = $path(#(match #args #match_body),*);
+        let kind = (&result).blocking_kind();
+        kind.block(result, #resolver);  // → resolver.respond() → 同步返回
+        return true;
+    })
+}
 ```
 
-**问题**: `nextTick` 确保了 Vue 完成一次 DOM 更新，info toast 应该已经渲染。然后 `dismissToast` 移除 info toast，再添加 success toast。但用户说 info toast 完全不显示了。
+**Async 路径** — 在 async_runtime 上执行:
+```rust
+fn body_async(...) -> TokenStream2 {
+    quote! {
+        #resolver.respond_async_serialized(async move {
+            let result = $path(#(#args?),*);
+            // → crate::async_runtime::spawn(task)  ← 不阻塞主线程
+        });
+        return true;
+    }
+}
+```
 
-**可能原因**: `dismissToast(scanToastId)` 在同一个同步代码块中执行，Vue 可能把 `showToast("info")` 和 `dismissToast(infoId)` 合并为一次更新——先添加再移除，结果是 info toast 从未渲染到屏幕。
+**respond_async_serialized** (ipc/mod.rs):
+```rust
+pub fn respond_async_serialized_inner<F>(self, task: F) {
+    crate::async_runtime::spawn(async move {  // ← spawn 到 tokio runtime
+        let response = task.await;
+        Self::return_result(self.webview, self.responder, response, ...);
+    });
+}
+```
 
-**这是 Vue 批量更新的典型陷阱**：在同一微任务/同步代码块中添加和移除同一个元素，Vue 会优化为"从未添加过"。
+---
+
+## scan_packages 中的阻塞操作
+
+```rust
+fn scan_packages(app: tauri::AppHandle) -> Result<ScanResult, String> {
+    // 所有操作都在主线程执行
+    let packages = scan_all_packages_with_log(&app, &scanned_at);  // 阻塞
+    let mut data = load_storage()?;                                 // 阻塞
+    save_storage(&data)?;                                           // 阻塞
+    // ...
+}
+```
+
+### scan_all_packages_with_log 中的阻塞调用
+
+```rust
+fn scan_all_packages_with_log(...) -> Vec<PackageInfo> {
+    for (name, command, scan_fn) in &managers {
+        if is_available(command) {                    // ← Command::new("which").output() 阻塞
+            let found = scan_fn(scanned_at);          // ← Command::new("brew").output() 阻塞
+            packages.extend(found);
+        }
+    }
+    packages
+}
+```
+
+每个包管理器的扫描都是一次 `Command::new().output()` 调用，等待子进程完成。在 macOS 上：
+- `brew list --versions` 可能需要 100ms-2s
+- `pip3 list` 可能需要 50ms-500ms
+- `npm list -g --depth=0` 可能需要 100ms-1s
+- `cargo install --list` 可能需要 200ms-1s
+
+**这些时间全部卡在主线程上，UI 完全冻结。**
 
 ---
 
 ## 修复方向
 
-### 方案 A：显示状态 toast，扫描完成后**更新内容**而非新建
+### 方案 A：将 scan_packages 改为 async 命令（推荐）
 
-不使用两个独立的 toast，而是在扫描开始时创建一个持久的 status toast，扫描完成后更新其 message 和 type：
+```rust
+#[tauri::command]
+async fn scan_packages(app: tauri::AppHandle) -> Result<ScanResult, String> {
+    let scanned_at = now_minutes();
+    let scanned_date = today();
 
-```js
-async function handleScan() {
-  const statusToastId = showToast("正在扫描...", "info");
-  try {
-    const result = await scanPackages();
-    // 更新现有 toast 的内容
-    updateToast(statusToastId, msg, "success");
-  } catch (error) {
-    updateToast(statusToastId, `扫描失败: ${error}`, "error");
-  }
+    // 将阻塞操作放到 spawn_blocking 中
+    let packages = tokio::task::spawn_blocking(move || {
+        scan_all_packages_with_log(&app_handle, &scanned_at)
+    }).await.map_err(|e| e.to_string())?;
+
+    // 文件 IO 也放到 spawn_blocking
+    let mut data = tokio::task::spawn_blocking(|| {
+        load_storage()
+    }).await.map_err(|e| e.to_string())??;
+
+    // ... 对比逻辑 ...
+
+    tokio::task::spawn_blocking(move || {
+        save_storage(&data)
+    }).await.map_err(|e| e.to_string())??;
+
+    Ok(ScanResult { ... })
 }
 ```
 
-需要新增 `updateToast(id, message, type)` 函数。
+### 方案 B：在同步命令内部使用线程
 
-### 方案 B：扫描期间显示状态 toast，完成后延迟替换
-
-```js
-async function handleScan() {
-  showToast("正在扫描...", "info");
-  const result = await scanPackages();
-  // 等待至少 800ms，确保用户看到"正在扫描"
-  const minDisplayTime = 800;
-  const scanDuration = Date.now() - scanStart;
-  if (scanDuration < minDisplayTime) {
-    await new Promise(r => setTimeout(r, minDisplayTime - scanDuration));
-  }
-  // 先清除旧 toast，再添加新 toast（分两次微任务）
-  toasts.value = toasts.value.filter(t => t.type !== "info");
-  await nextTick();
-  showToast("扫描完成", "success");
+```rust
+#[tauri::command]
+fn scan_packages(app: tauri::AppHandle) -> Result<ScanResult, String> {
+    // 不能直接用 spawn_blocking，因为是同步函数
+    // 可以用 std::thread::spawn + channel，但复杂度高
+    // 不推荐
 }
 ```
 
-### 方案 C：使用状态栏 + 单一 toast
+### 方案 C：前端不显示"正在扫描"toast
 
-将"正在扫描"放在底部状态栏（已有 `statusMessage`），只在完成/失败时弹 toast：
-
+最简单的临时方案，但不解决根本问题：
 ```js
-async function handleScan() {
-  statusMessage.value = "扫描中...";  // 状态栏已显示
-  // 不弹 info toast
-  try {
-    const result = await scanPackages();
-    showToast("扫描完成", "success");  // 只在完成时弹
-  } catch (error) {
-    showToast("扫描失败", "error");
-  }
-}
+// 不弹 info toast，只依赖状态栏
+statusMessage.value = "扫描中...";
+// showToast("正在启动扫描...", "info");  // 注释掉
 ```
-
-这是最简单的方案，但减少了用户感知。
 
 ---
 
-## 推荐方案
+## 推荐
 
-**方案 A（更新 toast 内容）**最符合交互设计原则：
-- 系统状态可见性：始终有一个 toast 显示当前状态
-- 反馈及时性：扫描开始立即有反馈，完成后平滑过渡
-- 无闪烁：不会出现两个 toast 同时弹出的问题
-- 无多余延迟：不需要人为等待
+**方案 A** 是正确的修复：
+- 解决根本问题（主线程阻塞）
+- 符合 Tauri 2 的 async 命令设计模式
+- UI 在扫描期间保持响应
+- toast 时序自然正确
 
-需要实现：
-1. `showToast` 返回 toast id
-2. 新增 `updateToast(id, message, type)` 函数
-3. `handleScan` 中使用单一 toast 管理生命周期
+需要确保 `tokio` 依赖已启用（Tauri 2 已包含 tokio）。
 
 ---
 
 ## 参考
 
-- Vue 3 响应式系统: https://vuejs.org/guide/extras/reactivity-in-depth.html
-- Vue TransitionGroup: https://vuejs.org/guide/built-ins/transition-group.html
 - Tauri 2 命令系统: https://v2.tauri.app/develop/calling-rust/
+- Tauri 2 async commands: `#[tauri::command]` on `async fn`
+- 源码: `tauri-macros-2.6.2/src/command/wrapper.rs`
+- 源码: `tauri-2.11.2/src/ipc/mod.rs` (respond_async_serialized)
+- 源码: `tauri-2.11.2/src/webview/mod.rs` (on_message)
