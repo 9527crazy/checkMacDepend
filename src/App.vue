@@ -179,7 +179,7 @@
                   <th class="th-time">时间</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody style="transition: opacity 0.15s ease;">
                 <tr v-for="pkg in filteredPackages" :key="`${pkg.manager}-${pkg.name}-${pkg.version}`">
                   <td>
                     <span class="manager-badge" :class="pkg.manager">{{ pkg.manager }}</span>
@@ -348,7 +348,6 @@ async function refreshSchedule() {
 
 async function handleScan() {
   busy.value = true;
-  logEntries.value = [];
   logExpanded.value = true;
   statusMessage.value = "扫描中...";
   try {
@@ -710,7 +709,7 @@ body {
   background: transparent;
   border-radius: 6px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .date-item:hover {
@@ -846,6 +845,7 @@ body {
 table {
   width: 100%;
   border-collapse: collapse;
+  transition: opacity 0.15s ease;
 }
 
 th {
@@ -980,52 +980,54 @@ tr:hover td {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 16px;
+  padding: 10px 16px;
   cursor: pointer;
   user-select: none;
-  background: var(--sf-sidebar);
+  background: linear-gradient(180deg, #FAFAFA 0%, #F5F5F7 100%);
   border-bottom: 1px solid var(--sf-gray-5);
+  transition: background 0.15s ease;
 }
 
 .log-header:hover {
-  background: var(--sf-gray-5);
+  background: linear-gradient(180deg, #F0F0F2 0%, #E8E8EA 100%);
 }
 
 .log-header-left {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: 8px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--sf-text-sec);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
 }
 
 .log-count {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
-  background: var(--sf-gray-5);
-  color: var(--sf-text-sec);
-  padding: 1px 5px;
-  border-radius: 8px;
+  background: var(--sf-blue);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
 }
 
 .log-header-right {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .log-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   color: var(--sf-gray-2);
   transition: all 0.15s ease;
@@ -1033,77 +1035,99 @@ tr:hover td {
 
 .log-btn:hover {
   background: var(--sf-gray-5);
-  color: var(--sf-text);
+  color: var(--sf-blue);
 }
 
 .log-toggle {
   font-size: 10px;
   color: var(--sf-gray-2);
-  margin-left: 4px;
+  margin-left: 2px;
 }
 
 .log-body {
-  height: 160px;
+  height: 180px;
   border-top: 1px solid var(--sf-gray-5);
 }
 
 .log-entries {
   height: 100%;
   overflow-y: auto;
-  padding: 8px 16px;
+  padding: 12px 16px;
   font-family: "SF Mono", Menlo, "Courier New", monospace;
-  font-size: 11px;
-  line-height: 1.6;
-  background: #1E1E1E;
+  font-size: 12px;
+  line-height: 1.7;
+  background: #1A1B26;
+  color: #C0CAF5;
+}
+
+.log-entries::-webkit-scrollbar {
+  width: 6px;
+}
+
+.log-entries::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.log-entries::-webkit-scrollbar-thumb {
+  background: #3B4261;
+  border-radius: 3px;
 }
 
 .log-empty {
-  color: #6A6A6A;
+  color: #565F89;
   font-style: italic;
+  padding: 20px 0;
+  text-align: center;
 }
 
 .log-entry {
   display: flex;
-  gap: 8px;
-  padding: 1px 0;
+  gap: 10px;
+  padding: 2px 0;
+  border-radius: 4px;
+}
+
+.log-entry:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .log-time {
-  color: #6A6A6A;
+  color: #565F89;
   flex-shrink: 0;
 }
 
 .log-level {
   flex-shrink: 0;
   font-weight: 600;
+  min-width: 50px;
 }
 
 .log-entry.info .log-level {
-  color: #61AFEF;
+  color: #7AA2F7;
 }
 
 .log-entry.success .log-level {
-  color: #98C379;
+  color: #9ECE6A;
 }
 
 .log-entry.warning .log-level {
-  color: #E5C07B;
+  color: #E0AF68;
 }
 
 .log-entry.error .log-level {
-  color: #E06C75;
+  color: #F7768E;
 }
 
 .log-msg {
-  color: #ABB2BF;
+  color: #C0CAF5;
 }
 
 .log-entry.success .log-msg {
-  color: #98C379;
+  color: #9ECE6A;
 }
 
 .log-entry.warning .log-msg {
-  color: #E5C07B;
+  color: #E0AF68;
 }
 
 /* Spinner */
