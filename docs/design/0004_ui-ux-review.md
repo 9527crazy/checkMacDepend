@@ -1,6 +1,13 @@
+---
+## 状态: 已批准
+创建: 2026-05-29
+更新: 2026-05-29
+负责人: 
+相关: AGENTS.md
+---
+
 # Package Monitor UI/UX 评审文档
 
-**评审日期**: 2026-05-29  
 **评审工具**: Interaction Design Skill + Super Design Core Skill + HIG Compliance Skill  
 **评审范围**: 完整界面和交互流程
 
