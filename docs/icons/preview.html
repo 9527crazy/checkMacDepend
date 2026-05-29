@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>菜单栏图标预览</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; padding: 40px; background: #f5f5f7; }
+    h1 { margin-bottom: 30px; }
+    .icons { display: flex; gap: 40px; flex-wrap: wrap; }
+    .icon-option { 
+      text-align: center; 
+      padding: 20px; 
+      background: white; 
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .icon-option h3 { margin: 15px 0 5px; font-size: 14px; }
+    .icon-option p { font-size: 12px; color: #666; margin: 0; }
+    .icon-preview { 
+      display: flex; 
+      gap: 20px; 
+      align-items: center;
+      justify-content: center;
+    }
+    .light-bg { background: #ffffff; padding: 10px; border-radius: 8px; }
+    .dark-bg { background: #1d1d1f; padding: 10px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>菜单栏图标方案预览</h1>
+  <p>每个方案显示浅色和深色背景下的效果（Template 图标会自动适配）</p>
+  <div class="icons">
+    <div class="icon-option">
+      <div class="icon-preview">
+        <div class="light-bg">
+          <object data="icon-option-1-box.svg" type="image/svg+xml" width="22" height="22"></object>
+        </div>
+        <div class="dark-bg">
+          <object data="icon-option-1-box.svg" type="image/svg+xml" width="22" height="22"></object>
+        </div>
+      </div>
+      <h3>方案1: 简洁盒子</h3>
+      <p>经典包管理器意象</p>
+    </div>
+    <div class="icon-option">
+      <div class="icon-preview">
+        <div class="light-bg">
+          <object data="icon-option-2-package.svg" type="image/svg+xml" width="22" height="22"></object>
+        </div>
+        <div class="dark-bg">
+          <object data="icon-option-2-package.svg" type="image/svg+xml" width="22" height="22"></object>
+        </div>
+      </div>
+      <h3>方案2: 打开的包裹</h3>
+      <p>立体感，类似 npm 风格</p>
+    </div>
+    <div class="icon-option">
+      <div class="icon-preview">
+        <div class="light-bg">
+          <object data="icon-option-3-terminal.svg" type="image/svg+xml" width="22" height="22"></object>
+        </div>
+        <div class="dark-bg">
+          <object data="icon-option-3-terminal.svg" type="image/svg+xml" width="22" height="22"></object>
+        </div>
+      </div>
+      <h3>方案3: 终端</h3>
+      <p>命令行风格，呼应扫描功能</p>
+    </div>
+    <div class="icon-option">
+      <div class="icon-preview">
+        <div class="light-bg">
+          <object data="icon-option-4-grid.svg" type="image/svg+xml" width="22" height="22"></object>
+        </div>
+        <div class="dark-bg">
+          <object data="icon-option-4-grid.svg" type="image/svg+xml" width="22" height="22"></object>
+        </div>
+      </div>
+      <h3>方案4: 网格</h3>
+      <p>模块化，现代感</p>
+    </div>
+    <div class="icon-option">
+      <div class="icon-preview">
+        <div class="light-bg">
+          <object data="icon-option-5-stack.svg" type="image/svg+xml" width="22" height="22"></object>
+        </div>
+        <div class="dark-bg">
+          <object data="icon-option-5-stack.svg" type="image/svg+xml" width="22" height="22"></object>
+        </div>
+      </div>
+      <h3>方案5: 堆叠层</h3>
+      <p>层次感，类似图层概念</p>
+    </div>
+  </div>
+</body>
+</html>

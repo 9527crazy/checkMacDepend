@@ -296,6 +296,7 @@ const logEntries = ref([]);
 const logExpanded = ref(false);
 const logContainer = ref(null);
 let unlisten = null;
+let unlistenLog = null;
 
 const dates = computed(() => state.value.dates || []);
 const managerText = computed(() => {
@@ -407,7 +408,11 @@ function clearLogs() {
 }
 
 onMounted(async () => {
-  unlisten = await listen("scan-log", (event) => {
+  unlisten = await listen("request-scan", () => {
+    handleScan();
+  });
+
+  unlistenLog = await listen("scan-log", (event) => {
     logEntries.value.push(event.payload);
     nextTick(() => {
       if (logContainer.value) {
@@ -426,6 +431,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (unlisten) unlisten();
+  if (unlistenLog) unlistenLog();
 });
 </script>
 

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22" fill="none">
+  <!-- 方案5: 堆叠层 -->
+  <path d="M11 3L3 7.5 11 12l8-4.5L11 3z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+  <path d="M3 11l8 4.5 8-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M3 14.5l8 4.5 8-4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

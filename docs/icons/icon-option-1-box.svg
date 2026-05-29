@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22" fill="none">
+  <!-- 方案1: 简洁盒子 -->
+  <rect x="3" y="7" width="16" height="12" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/>
+  <path d="M7 7V5.5C7 4.67 7.67 4 8.5 4h5c.83 0 1.5.67 1.5 1.5V7" stroke="currentColor" stroke-width="1.5" fill="none"/>
+  <path d="M3 11h16" stroke="currentColor" stroke-width="1.5"/>
+  <circle cx="11" cy="15" r="1.5" fill="currentColor"/>
+</svg>

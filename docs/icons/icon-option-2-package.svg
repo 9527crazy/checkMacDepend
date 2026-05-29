@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22" fill="none">
+  <!-- 方案2: 打开的包裹 -->
+  <path d="M11 3L3 7v8l8 4 8-4V7l-8-4z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+  <path d="M11 11v8" stroke="currentColor" stroke-width="1.5"/>
+  <path d="M3 7l8 4 8-4" stroke="currentColor" stroke-width="1.5"/>
+  <path d="M11 7v4" stroke="currentColor" stroke-width="1.5"/>
+</svg>

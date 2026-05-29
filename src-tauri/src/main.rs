@@ -10,6 +10,9 @@ use std::{
     time::Duration,
 };
 use tauri::Emitter;
+use tauri::Manager;
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_opener::OpenerExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -760,6 +763,63 @@ fn main() {
             start_scheduled_scan,
             stop_scheduled_scan
         ])
+        .setup(|app| {
+            // Build tray menu
+            let show_item = MenuItemBuilder::new("打开主窗口").id("show").build(app)?;
+            let scan_item = MenuItemBuilder::new("立即扫描").id("scan").build(app)?;
+            let quit_item = MenuItemBuilder::new("退出").id("quit").build(app)?;
+            
+            let menu = MenuBuilder::new(app)
+                .item(&show_item)
+                .item(&scan_item)
+                .item(&PredefinedMenuItem::separator(app)?)
+                .item(&quit_item)
+                .build()?;
+            
+            // Build tray icon
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .tooltip("Package Monitor - 包安装监控")
+                .on_menu_event(move |app, event| {
+                    match event.id().as_ref() {
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "scan" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                                let _ = window.emit("request-scan", ());
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+            
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running Package Monitor");
 }
