@@ -11,3 +11,15 @@ export function scanPackages() {
 export function generateReport(date) {
   return invoke("generate_report", { date });
 }
+
+export function getScanSchedule() {
+  return invoke("get_scan_schedule");
+}
+
+export function startScheduledScan(intervalHours) {
+  return invoke("start_scheduled_scan", { intervalHours });
+}
+
+export function stopScheduledScan() {
+  return invoke("stop_scheduled_scan");
+}

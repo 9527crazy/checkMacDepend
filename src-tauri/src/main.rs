@@ -5,7 +5,11 @@ use std::{
     fs,
     path::PathBuf,
     process::Command,
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
 };
+// use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +102,32 @@ struct NpmList {
 struct NpmPackage {
     #[serde(default)]
     version: String,
+}
+
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScanSchedule {
+    enabled: bool,
+    interval_hours: u32,
+    last_scan_at: Option<String>,
+}
+
+impl Default for ScanSchedule {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_hours: 24,
+            last_scan_at: None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ScanScheduleState {
+    enabled: bool,
+    interval_hours: u32,
+    last_scan_at: Option<String>,
 }
 
 fn now_minutes() -> String {
@@ -508,6 +538,128 @@ fn render_report(date: &str, packages: &[PackageInfo], total_unique: usize) -> S
 }
 
 #[tauri::command]
+fn get_scan_schedule(state: tauri::State<'_, Arc<Mutex<ScanSchedule>>>) -> ScanScheduleState {
+    let schedule = state.lock().unwrap();
+    ScanScheduleState {
+        enabled: schedule.enabled,
+        interval_hours: schedule.interval_hours,
+        last_scan_at: schedule.last_scan_at.clone(),
+    }
+}
+
+#[tauri::command]
+fn start_scheduled_scan(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<Mutex<ScanSchedule>>>,
+    interval_hours: u32,
+) -> Result<ScanScheduleState, String> {
+    let mut schedule = state.lock().unwrap();
+    schedule.enabled = true;
+    schedule.interval_hours = interval_hours.max(1);
+    
+    let state_clone = Arc::clone(&state);
+    let app_handle = app.clone();
+    
+    thread::spawn(move || {
+        loop {
+            {
+                let schedule = state_clone.lock().unwrap();
+                if !schedule.enabled {
+                    break;
+                }
+            }
+            
+            thread::sleep(Duration::from_secs(3600 * interval_hours as u64));
+            
+            {
+                let schedule = state_clone.lock().unwrap();
+                if !schedule.enabled {
+                    break;
+                }
+            }
+            
+            let _ = scan_packages_internal(&app_handle, &state_clone);
+        }
+    });
+    
+    Ok(ScanScheduleState {
+        enabled: schedule.enabled,
+        interval_hours: schedule.interval_hours,
+        last_scan_at: schedule.last_scan_at.clone(),
+    })
+}
+
+#[tauri::command]
+fn stop_scheduled_scan(state: tauri::State<'_, Arc<Mutex<ScanSchedule>>>) -> ScanScheduleState {
+    let mut schedule = state.lock().unwrap();
+    schedule.enabled = false;
+    ScanScheduleState {
+        enabled: false,
+        interval_hours: schedule.interval_hours,
+        last_scan_at: schedule.last_scan_at.clone(),
+    }
+}
+
+fn scan_packages_internal(
+    _app: &tauri::AppHandle,
+    schedule_state: &Arc<Mutex<ScanSchedule>>,
+) -> Result<ScanResult, String> {
+    let scanned_date = today();
+    let scanned_at = now_minutes();
+    let packages = scan_all_packages(&scanned_at);
+    
+    let mut data = load_storage()?;
+    let previous_keys: HashSet<String> = data
+        .snapshot
+        .packages
+        .iter()
+        .map(package_key)
+        .collect();
+    
+    let has_baseline = !data.snapshot.packages.is_empty() || data.metadata.last_scan_at.is_some();
+
+    let mut new_packages = Vec::new();
+    if has_baseline {
+        for package in &packages {
+            if !previous_keys.contains(&package_key(package)) {
+                new_packages.push(package.clone());
+            }
+        }
+    }
+
+    if !new_packages.is_empty() {
+        let day_records = data.records.entry(scanned_date).or_default();
+        let mut existing_keys = day_records.iter().map(package_key).collect::<HashSet<_>>();
+        for package in &new_packages {
+            if existing_keys.insert(package_key(package)) {
+                day_records.push(package.clone());
+            }
+        }
+    }
+
+    data.snapshot = Snapshot {
+        packages: packages.iter().map(snapshot_package).collect(),
+        scanned_at: Some(scanned_at.clone()),
+    };
+    data.metadata.schema_version = 2;
+    data.metadata.last_scan_at = Some(scanned_at.clone());
+    save_storage(&data)?;
+    
+    {
+        let mut schedule = schedule_state.lock().unwrap();
+        schedule.last_scan_at = Some(scanned_at.clone());
+    }
+
+    Ok(ScanResult {
+        new_count: new_packages.len(),
+        scanned_count: packages.len(),
+        new_packages,
+        is_initial_scan: !has_baseline,
+        scanned_at,
+    })
+}
+
+#[tauri::command]
 fn generate_report(app: tauri::AppHandle, date: String) -> Result<String, String> {
     let data = load_storage()?;
     let packages = data.records.get(&date).cloned().unwrap_or_default();
@@ -523,12 +675,18 @@ fn generate_report(app: tauri::AppHandle, date: String) -> Result<String, String
 }
 
 fn main() {
+    let scan_schedule = Arc::new(Mutex::new(ScanSchedule::default()));
+    
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(scan_schedule)
         .invoke_handler(tauri::generate_handler![
             get_app_state,
             scan_packages,
-            generate_report
+            generate_report,
+            get_scan_schedule,
+            start_scheduled_scan,
+            stop_scheduled_scan
         ])
         .run(tauri::generate_context!())
         .expect("error while running Package Monitor");
