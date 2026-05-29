@@ -1,0 +1,19 @@
+:root {
+  --sf-blue: #007AFF;
+  --sf-blue-light: #409CFF;
+  --sf-blue-dark: #0051D5;
+  --sf-purple: #5856D6;
+  --sf-green: #34C759;
+  --sf-red: #FF3B30;
+  --sf-orange: #FF9500;
+  --sf-gray-1: #8E8E93;
+  --sf-gray-2: #AEAEB2;
+  --sf-gray-3: #C7C7CC;
+  --sf-gray-4: #D1D1D6;
+  --sf-gray-5: #E5E5EA;
+  --sf-gray-6: #F2F2F7;
+  --sf-bg: #FFFFFF;
+  --sf-sidebar: #F5F5F7;
+  --sf-text: #1D1D1F;
+  --sf-text-sec: #6E6E73;
+}
