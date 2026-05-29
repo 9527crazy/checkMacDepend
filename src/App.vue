@@ -35,10 +35,12 @@
         <button 
           type="button" 
           class="sf-button primary" 
+          :class="{ loading: busy }" 
           :disabled="busy" 
           @click="handleScan"
         >
-          <svg v-if="!busy" width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <span v-if="busy" class="spinner"></span>
+          <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 2a6 6 0 100 12A6 6 0 008 2zm0 1v4l3 2"/>
           </svg>
           {{ busy ? "扫描中..." : "立即扫描" }}
@@ -204,7 +206,7 @@
         </div>
 
         <!-- Status Bar -->
-        <div class="status-bar">
+        <div class="status-bar" :class="{ active: busy }">
           <span class="status-message">{{ statusMessage }}</span>
           <span class="status-total" v-if="state.total_count">
             共 {{ state.total_count }} 个包
@@ -955,6 +957,26 @@ tr:hover td {
   color: var(--sf-text-sec);
 }
 
+
+/* Spinner */
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.sf-button.loading {
+  pointer-events: none;
+  opacity: 0.8;
+}
+
 /* Status Bar */
 .status-bar {
   display: flex;
@@ -964,6 +986,16 @@ tr:hover td {
   background: var(--sf-sidebar);
   border-top: 1px solid var(--sf-gray-5);
   font-size: 11px;
+  transition: background 0.2s ease;
+}
+
+.status-bar.active {
+  background: rgba(0, 122, 255, 0.05);
+}
+
+.status-bar.active .status-message {
+  color: var(--sf-blue);
+  font-weight: 500;
 }
 
 .status-message {
