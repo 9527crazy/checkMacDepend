@@ -205,6 +205,51 @@
           </div>
         </div>
 
+        <!-- Log Panel -->
+        <div class="log-panel" :class="{ collapsed: !logExpanded }">
+          <div class="log-header" @click="logExpanded = !logExpanded">
+            <div class="log-header-left">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2 3h12v1H2V3zm0 3h12v1H2V6zm0 3h8v1H2V9zm0 3h6v1H2v-1z"/>
+              </svg>
+              <span>扫描日志</span>
+              <span class="log-count" v-if="logEntries.length">{{ logEntries.length }}</span>
+            </div>
+            <div class="log-header-right" @click.stop>
+              <button type="button" class="log-btn" @click="copyLogs" title="复制日志">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M4 2h8v1H4V2zm0 3h8v8H4V5zm1 1v6h6V6H5z"/>
+                </svg>
+              </button>
+              <button type="button" class="log-btn" @click="clearLogs" title="清空日志">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M5 2V1h6v1h3v1H2V2h3zm-1 3h8l-1 9H5L4 5z"/>
+                </svg>
+              </button>
+              <span class="log-toggle">
+                {{ logExpanded ? "▼" : "▲" }}
+              </span>
+            </div>
+          </div>
+          <div class="log-body" v-show="logExpanded">
+            <div class="log-entries" ref="logContainer">
+              <div v-if="logEntries.length === 0" class="log-empty">
+                等待扫描...
+              </div>
+              <div
+                v-for="(entry, index) in logEntries"
+                :key="index"
+                class="log-entry"
+                :class="entry.level"
+              >
+                <span class="log-time">{{ entry.timestamp }}</span>
+                <span class="log-level">[{{ entry.level }}]</span>
+                <span class="log-msg">{{ entry.message }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Status Bar -->
         <div class="status-bar" :class="{ active: busy }">
           <span class="status-message">{{ statusMessage }}</span>
@@ -218,7 +263,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { listen } from "@tauri-apps/api/event";
 import { 
   generateReport, 
   getAppState, 
@@ -245,6 +291,11 @@ const schedule = ref({
   last_scan_at: null,
 });
 const scheduleInterval = ref(24);
+
+const logEntries = ref([]);
+const logExpanded = ref(false);
+const logContainer = ref(null);
+let unlisten = null;
 
 const dates = computed(() => state.value.dates || []);
 const managerText = computed(() => {
@@ -296,6 +347,8 @@ async function refreshSchedule() {
 
 async function handleScan() {
   busy.value = true;
+  logEntries.value = [];
+  logExpanded.value = true;
   statusMessage.value = "扫描中...";
   try {
     const result = await scanPackages();
@@ -342,13 +395,37 @@ async function handleStopSchedule() {
   }
 }
 
+function copyLogs() {
+  const text = logEntries.value
+    .map((e) => `${e.timestamp}  [${e.level}]  ${e.message}`)
+    .join("\n");
+  navigator.clipboard.writeText(text);
+}
+
+function clearLogs() {
+  logEntries.value = [];
+}
+
 onMounted(async () => {
+  unlisten = await listen("scan-log", (event) => {
+    logEntries.value.push(event.payload);
+    nextTick(() => {
+      if (logContainer.value) {
+        logContainer.value.scrollTop = logContainer.value.scrollHeight;
+      }
+    });
+  });
+
   try {
     await refreshState();
     await refreshSchedule();
   } catch (error) {
     statusMessage.value = `加载失败: ${error}`;
   }
+});
+
+onUnmounted(() => {
+  if (unlisten) unlisten();
 });
 </script>
 
@@ -398,10 +475,9 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 16px;
-  background: var(--sf-bg);
+  padding: 10px 20px;
+  background: var(--sf-sidebar);
   border-bottom: 1px solid var(--sf-gray-5);
-  flex-shrink: 0;
 }
 
 .topbar-left {
@@ -410,23 +486,10 @@ body {
   gap: 10px;
 }
 
-.app-icon {
-  width: 32px;
-  height: 32px;
-  flex-shrink: 0;
-}
-
-.app-icon svg {
-  width: 100%;
-  height: 100%;
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1));
-}
-
 .topbar-title h1 {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--sf-text);
-  line-height: 1.2;
 }
 
 .topbar-subtitle {
@@ -439,7 +502,7 @@ body {
   gap: 8px;
 }
 
-/* SF Buttons */
+/* Buttons */
 .sf-button {
   display: inline-flex;
   align-items: center;
@@ -454,98 +517,78 @@ body {
   font-family: inherit;
 }
 
-.sf-button svg {
-  flex-shrink: 0;
-}
-
 .sf-button.primary {
-  background: linear-gradient(180deg, var(--sf-blue-light) 0%, var(--sf-blue) 100%);
+  background: linear-gradient(180deg, #409CFF 0%, var(--sf-blue) 100%);
   color: white;
   box-shadow: 0 1px 3px rgba(0, 122, 255, 0.3);
 }
 
-.sf-button.primary:hover:not(:disabled) {
-  background: linear-gradient(180deg, var(--sf-blue) 0%, var(--sf-blue-dark) 100%);
-  box-shadow: 0 2px 6px rgba(0, 122, 255, 0.4);
-  transform: translateY(-1px);
-}
-
-.sf-button.primary:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.sf-button.primary:disabled {
-  background: var(--sf-gray-4);
-  box-shadow: none;
-  cursor: not-allowed;
+.sf-button.primary:hover {
+  background: linear-gradient(180deg, #6BB3FF 0%, #3395FF 100%);
 }
 
 .sf-button.secondary {
   background: var(--sf-gray-6);
   color: var(--sf-text);
-  border: 1px solid var(--sf-gray-4);
+  border: 1px solid var(--sf-gray-5);
 }
 
-.sf-button.secondary:hover:not(:disabled) {
+.sf-button.secondary:hover {
   background: var(--sf-gray-5);
-  border-color: var(--sf-gray-3);
-}
-
-.sf-button.secondary:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .sf-button.danger {
-  background: linear-gradient(180deg, #FF6B6B 0%, var(--sf-red) 100%);
+  background: var(--sf-red);
   color: white;
-  box-shadow: 0 1px 3px rgba(255, 59, 48, 0.3);
-}
-
-.sf-button.danger:hover {
-  box-shadow: 0 2px 6px rgba(255, 59, 48, 0.4);
-  transform: translateY(-1px);
 }
 
 .sf-button.small {
-  padding: 5px 10px;
+  padding: 4px 10px;
   font-size: 11px;
+}
+
+.sf-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sf-select {
+  padding: 4px 8px;
+  border: 1px solid var(--sf-gray-5);
+  border-radius: 6px;
+  font-size: 11px;
+  background: var(--sf-bg);
+  color: var(--sf-text);
+  font-family: inherit;
 }
 
 /* Workspace */
 .workspace {
-  display: flex;
   flex: 1;
+  display: flex;
   overflow: hidden;
 }
 
 /* Sidebar */
 .sidebar {
-  width: 220px;
+  width: 200px;
   background: var(--sf-sidebar);
   border-right: 1px solid var(--sf-gray-5);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .sidebar-section {
-  padding: 14px 12px;
+  padding: 12px;
   border-bottom: 1px solid var(--sf-gray-5);
-}
-
-.sidebar-section.date-section {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 .sidebar-title {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--sf-text-sec);
   text-transform: uppercase;
@@ -553,11 +596,6 @@ body {
   margin-bottom: 10px;
 }
 
-.sidebar-title svg {
-  opacity: 0.7;
-}
-
-/* Stats */
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -567,10 +605,10 @@ body {
 
 .stat-card {
   background: var(--sf-bg);
-  padding: 10px;
+  border: 1px solid var(--sf-gray-5);
   border-radius: 8px;
+  padding: 10px;
   text-align: center;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
 
 .stat-number {
@@ -578,31 +616,25 @@ body {
   font-size: 20px;
   font-weight: 600;
   color: var(--sf-blue);
-  line-height: 1.2;
 }
 
-.stat-card .stat-label {
+.stat-label {
   font-size: 10px;
   color: var(--sf-text-sec);
-  margin-top: 2px;
 }
 
 .stat-info {
   background: var(--sf-bg);
+  border: 1px solid var(--sf-gray-5);
   border-radius: 8px;
   padding: 8px 10px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
 
 .stat-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0;
-}
-
-.stat-row + .stat-row {
-  border-top: 1px solid var(--sf-gray-6);
+  padding: 3px 0;
 }
 
 .stat-key {
@@ -612,17 +644,12 @@ body {
 
 .stat-val {
   font-size: 11px;
-  font-weight: 500;
   color: var(--sf-text);
+  font-weight: 500;
   max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.stat-val.managers {
-  max-width: 90px;
-  font-size: 10px;
 }
 
 /* Schedule */
@@ -632,39 +659,12 @@ body {
   margin-bottom: 8px;
 }
 
-.sf-select {
-  flex: 1;
-  padding: 5px 20px 5px 8px;
-  border: 1px solid var(--sf-gray-4);
-  border-radius: 5px;
-  font-size: 11px;
-  color: var(--sf-text);
-  background: var(--sf-bg);
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L4 4L7 1' stroke='%2386868B' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 6px center;
-}
-
-.sf-select:disabled {
-  background: var(--sf-gray-6);
-  cursor: not-allowed;
-}
-
 .schedule-status {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 10px;
+  gap: 6px;
+  font-size: 11px;
   color: var(--sf-text-sec);
-  padding: 6px 8px;
-  background: var(--sf-bg);
-  border-radius: 5px;
-}
-
-.schedule-status.active {
-  color: var(--sf-green);
 }
 
 .status-indicator {
@@ -676,16 +676,17 @@ body {
 
 .schedule-status.active .status-indicator {
   background: var(--sf-green);
-  box-shadow: 0 0 6px var(--sf-green);
-  animation: pulse 2s infinite;
+  box-shadow: 0 0 4px rgba(52, 199, 89, 0.5);
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+/* Dates */
+.date-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-/* Date List */
 .date-list {
   flex: 1;
   overflow-y: auto;
@@ -698,20 +699,21 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 10px;
-  background: transparent;
+  padding: 6px 10px;
   border: none;
+  background: transparent;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .date-item:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--sf-gray-5);
 }
 
 .date-item.active {
   background: var(--sf-blue);
+  color: white;
 }
 
 .date-text {
@@ -957,6 +959,146 @@ tr:hover td {
   color: var(--sf-text-sec);
 }
 
+/* Log Panel */
+.log-panel {
+  border-top: 1px solid var(--sf-gray-5);
+  background: var(--sf-bg);
+  flex-shrink: 0;
+}
+
+.log-panel.collapsed .log-body {
+  display: none;
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--sf-sidebar);
+  border-bottom: 1px solid var(--sf-gray-5);
+}
+
+.log-header:hover {
+  background: var(--sf-gray-5);
+}
+
+.log-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sf-text-sec);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.log-count {
+  font-size: 9px;
+  font-weight: 600;
+  background: var(--sf-gray-5);
+  color: var(--sf-text-sec);
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+
+.log-header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.log-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--sf-gray-2);
+  transition: all 0.15s ease;
+}
+
+.log-btn:hover {
+  background: var(--sf-gray-5);
+  color: var(--sf-text);
+}
+
+.log-toggle {
+  font-size: 10px;
+  color: var(--sf-gray-2);
+  margin-left: 4px;
+}
+
+.log-body {
+  height: 160px;
+  border-top: 1px solid var(--sf-gray-5);
+}
+
+.log-entries {
+  height: 100%;
+  overflow-y: auto;
+  padding: 8px 16px;
+  font-family: "SF Mono", Menlo, "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  background: #1E1E1E;
+}
+
+.log-empty {
+  color: #6A6A6A;
+  font-style: italic;
+}
+
+.log-entry {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.log-time {
+  color: #6A6A6A;
+  flex-shrink: 0;
+}
+
+.log-level {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.log-entry.info .log-level {
+  color: #61AFEF;
+}
+
+.log-entry.success .log-level {
+  color: #98C379;
+}
+
+.log-entry.warning .log-level {
+  color: #E5C07B;
+}
+
+.log-entry.error .log-level {
+  color: #E06C75;
+}
+
+.log-msg {
+  color: #ABB2BF;
+}
+
+.log-entry.success .log-msg {
+  color: #98C379;
+}
+
+.log-entry.warning .log-msg {
+  color: #E5C07B;
+}
 
 /* Spinner */
 .spinner {

@@ -9,7 +9,7 @@ use std::{
     thread,
     time::Duration,
 };
-// use tauri::Manager;
+use tauri::Emitter;
 use tauri_plugin_opener::OpenerExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,8 +104,6 @@ struct NpmPackage {
     version: String,
 }
 
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ScanSchedule {
     enabled: bool,
@@ -130,12 +128,34 @@ struct ScanScheduleState {
     last_scan_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ScanLogPayload {
+    timestamp: String,
+    level: String,
+    message: String,
+}
+
 fn now_minutes() -> String {
     Local::now().format("%Y-%m-%d %H:%M").to_string()
 }
 
+fn now_seconds() -> String {
+    Local::now().format("%H:%M:%S").to_string()
+}
+
 fn today() -> String {
     Local::now().format("%Y-%m-%d").to_string()
+}
+
+fn emit_log(app: &tauri::AppHandle, level: &str, message: &str) {
+    let _ = app.emit(
+        "scan-log",
+        ScanLogPayload {
+            timestamp: now_seconds(),
+            level: level.to_string(),
+            message: message.to_string(),
+        },
+    );
 }
 
 fn storage_dir() -> Result<PathBuf, String> {
@@ -361,26 +381,34 @@ fn available_managers() -> Vec<String> {
     .collect()
 }
 
-fn scan_all_packages(scanned_at: &str) -> Vec<PackageInfo> {
+
+
+
+fn scan_all_packages_with_log(app: &tauri::AppHandle, scanned_at: &str) -> Vec<PackageInfo> {
+    emit_log(app, "info", "开始扫描系统包...");
+
     let mut packages = Vec::new();
-    if is_available("brew") {
-        packages.extend(scan_homebrew(scanned_at));
+
+    let managers: Vec<(&str, &str, fn(&str) -> Vec<PackageInfo>)> = vec![
+        ("homebrew", "brew", scan_homebrew),
+        ("pip", "pip3", scan_pip),
+        ("npm", "npm", scan_npm),
+        ("cargo", "cargo", scan_cargo),
+        ("gem", "gem", scan_gem),
+        ("go", "go", scan_go),
+    ];
+
+    for (name, command, scan_fn) in &managers {
+        if is_available(command) {
+            emit_log(app, "info", &format!("检测 {}...", name));
+            let found = scan_fn(scanned_at);
+            emit_log(app, "info", &format!("{}: 找到 {} 个包", name, found.len()));
+            packages.extend(found);
+        } else {
+            emit_log(app, "warning", &format!("{}: 未安装，跳过", name));
+        }
     }
-    if is_available("pip3") || is_available("pip") {
-        packages.extend(scan_pip(scanned_at));
-    }
-    if is_available("npm") {
-        packages.extend(scan_npm(scanned_at));
-    }
-    if is_available("cargo") {
-        packages.extend(scan_cargo(scanned_at));
-    }
-    if is_available("gem") {
-        packages.extend(scan_gem(scanned_at));
-    }
-    if is_available("go") {
-        packages.extend(scan_go(scanned_at));
-    }
+
     packages
 }
 
@@ -408,10 +436,10 @@ fn get_app_state() -> Result<AppState, String> {
 }
 
 #[tauri::command]
-fn scan_packages() -> Result<ScanResult, String> {
+fn scan_packages(app: tauri::AppHandle) -> Result<ScanResult, String> {
     let scanned_at = now_minutes();
     let scanned_date = today();
-    let packages = scan_all_packages(&scanned_at);
+    let packages = scan_all_packages_with_log(&app, &scanned_at);
     let mut data = load_storage()?;
     let previous_keys = data
         .snapshot
@@ -447,6 +475,27 @@ fn scan_packages() -> Result<ScanResult, String> {
     data.metadata.schema_version = 2;
     data.metadata.last_scan_at = Some(scanned_at.clone());
     save_storage(&data)?;
+
+    if has_baseline {
+        emit_log(
+            &app,
+            "success",
+            &format!(
+                "扫描完成！共 {} 个包，发现 {} 个新增包",
+                packages.len(),
+                new_packages.len()
+            ),
+        );
+    } else {
+        emit_log(
+            &app,
+            "success",
+            &format!(
+                "首次扫描完成！共 {} 个包，已建立基线",
+                packages.len()
+            ),
+        );
+    }
 
     Ok(ScanResult {
         new_count: new_packages.len(),
@@ -517,15 +566,17 @@ fn render_report(date: &str, packages: &[PackageInfo], total_unique: usize) -> S
     </section>
     <section>
       <table>
-        <thead><tr><th>包管理器</th><th>包名</th><th>版本</th><th>安装时间</th></tr></thead>
+        <thead>
+          <tr><th>管理器</th><th>包名</th><th>版本</th><th>时间</th></tr>
+        </thead>
         <tbody>{rows}</tbody>
       </table>
     </section>
   </main>
 </body>
 </html>"#,
-        date = escape_html(date),
-        generated_at = Local::now().format("%Y-%m-%d %H:%M:%S"),
+        date = date,
+        generated_at = now_minutes(),
         package_count = packages.len(),
         total_unique = total_unique,
         manager_count = packages
@@ -601,12 +652,12 @@ fn stop_scheduled_scan(state: tauri::State<'_, Arc<Mutex<ScanSchedule>>>) -> Sca
 }
 
 fn scan_packages_internal(
-    _app: &tauri::AppHandle,
+    app: &tauri::AppHandle,
     schedule_state: &Arc<Mutex<ScanSchedule>>,
 ) -> Result<ScanResult, String> {
     let scanned_date = today();
     let scanned_at = now_minutes();
-    let packages = scan_all_packages(&scanned_at);
+    let packages = scan_all_packages_with_log(app, &scanned_at);
     
     let mut data = load_storage()?;
     let previous_keys: HashSet<String> = data
@@ -648,6 +699,27 @@ fn scan_packages_internal(
     {
         let mut schedule = schedule_state.lock().unwrap();
         schedule.last_scan_at = Some(scanned_at.clone());
+    }
+
+    if has_baseline {
+        emit_log(
+            app,
+            "success",
+            &format!(
+                "扫描完成！共 {} 个包，发现 {} 个新增包",
+                packages.len(),
+                new_packages.len()
+            ),
+        );
+    } else {
+        emit_log(
+            app,
+            "success",
+            &format!(
+                "首次扫描完成！共 {} 个包，已建立基线",
+                packages.len()
+            ),
+        );
     }
 
     Ok(ScanResult {
