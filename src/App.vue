@@ -973,8 +973,8 @@ tr:hover td {
 }
 
 .sf-button.loading {
-  pointer-events: none;
   opacity: 0.8;
+  cursor: wait;
 }
 
 /* Status Bar */
